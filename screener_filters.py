@@ -7,14 +7,19 @@ def download_data(symbol):
         data = yf.download(symbol, period="365d", interval="1d", progress=False, auto_adjust=True)
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = [col[0] for col in data.columns]
-        return data if "Close" in data.columns else None
+        return data
     except:
         return None
 
 def check_rsi(symbol, rsi_thresh=50, min_price=5):
     try:
         data = download_data(symbol)
-        if data is None or "Close" not in data.columns or len(data) < 20:
+        if (
+            data is None or
+            not isinstance(data, pd.DataFrame) or
+            "Close" not in data.columns or
+            len(data) < 20
+        ):
             return None
 
         close = data["Close"].dropna()
@@ -32,7 +37,12 @@ def check_rsi(symbol, rsi_thresh=50, min_price=5):
 def check_ema_crossover(symbol):
     try:
         data = download_data(symbol)
-        if data is None or "Close" not in data.columns or len(data) < 50:
+        if (
+            data is None or
+            not isinstance(data, pd.DataFrame) or
+            "Close" not in data.columns or
+            len(data) < 50
+        ):
             return None
 
         close = data["Close"].dropna()
@@ -55,7 +65,12 @@ def check_ema_crossover(symbol):
 def check_macd_crossover(symbol):
     try:
         data = download_data(symbol)
-        if data is None or "Close" not in data.columns or len(data) < 30:
+        if (
+            data is None or
+            not isinstance(data, pd.DataFrame) or
+            "Close" not in data.columns or
+            len(data) < 30
+        ):
             return None
 
         close = data["Close"].dropna()
@@ -80,7 +95,13 @@ def check_macd_crossover(symbol):
 def check_volume_spike(symbol, multiplier=1.5):
     try:
         data = download_data(symbol)
-        if data is None or "Close" not in data.columns or "Volume" not in data.columns or len(data) < 21:
+        if (
+            data is None or
+            not isinstance(data, pd.DataFrame) or
+            "Close" not in data.columns or
+            "Volume" not in data.columns or
+            len(data) < 21
+        ):
             return None
 
         close = data["Close"].dropna()
