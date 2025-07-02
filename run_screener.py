@@ -1,91 +1,154 @@
 # === Import required libraries ===
-import yfinance as yf               # To fetch stock price history
-import pandas_ta as ta              # To calculate RSI and EMA indicators
-import pandas as pd                 # To load CSV and manipulate tabular data
-import json                         # To save results as a JSON file
-import warnings                     # To suppress any annoying future warnings
+import yfinance as yf  # For downloading stock price data
+import pandas as pd  # For handling dataframes
+import pandas_ta as ta  # For calculating technical indicators
+import json  # For saving results to JSON file
+from concurrent.futures import ThreadPoolExecutor, as_completed  # For running filters in parallel
+from tqdm import tqdm  # For showing progress bar in loops
 
-# === Suppress FutureWarnings from yfinance about auto_adjust ===
-warnings.simplefilter(action='ignore', category=FutureWarning)
+# === Step 1: Load all tickers from CSV ===
+df = pd.read_csv("all_us_tickers.csv")  # Load tickers from a CSV file
+all_tickers = df["symbol"].dropna().unique().tolist()  # Load all tickers without filtering
+print(f"✅ Loaded {len(all_tickers)} tickers for screening")
 
+# === RSI Filter ===
+def check_rsi(symbol):
+    try:
+        data = yf.download(symbol, period="365d", interval="1d", progress=False, auto_adjust=True)
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = [col[0] for col in data.columns]
+            data.columns.name = None
+        if "Close" not in data.columns or data["Close"].isna().all():
+            return None
+        latest_close = data["Close"].dropna().iloc[-1]
+        if latest_close < 5:
+            return None
+        if len(data) < 20:
+            return None
+        data.ta.rsi(length=14, append=True)
+        if "RSI_14" in data.columns and not data["RSI_14"].dropna().empty:
+            latest_rsi = data["RSI_14"].dropna().iloc[-1]
+            if latest_rsi < 50:
+                return symbol
+    except:
+        return None
+    return None
 
-# === STEP 1: Function to filter for RSI < 30 ===
-def screen_rsi_oversold(tickers):
-    results = []  # Initialize an empty list to hold tickers that meet the RSI condition
+# === EMA Crossover ===
+def check_ema_crossover(symbol):
+    try:
+        data = yf.download(symbol, period="365d", interval="1d", progress=False, auto_adjust=True)
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = [col[0] for col in data.columns]
+            data.columns.name = None
+        if "Close" not in data.columns or data["Close"].isna().all():
+            return None
+        latest_close = data["Close"].dropna().iloc[-1]
+        if latest_close < 5:
+            return None
+        if len(data) < 25:
+            return None
+        data["EMA20"] = ta.ema(data["Close"], length=20)
+        data["EMA50"] = ta.ema(data["Close"], length=50)
+        data.dropna(subset=["EMA20", "EMA50"], inplace=True)
+        for i in range(-5, -1):
+            if data["EMA20"].iloc[i - 1] < data["EMA50"].iloc[i - 1] and data["EMA20"].iloc[i] > data["EMA50"].iloc[i]:
+                return symbol
+    except:
+        return None
+    return None
 
-    for symbol in tickers:
-        # Download the last 365 days of daily price data for each ticker
-        data = yf.download(symbol, period="365d", interval="1d", progress=False)
+# === MACD Crossover ===
+def check_macd_crossover(symbol):
+    try:
+        data = yf.download(symbol, period="365d", interval="1d", progress=False, auto_adjust=True)
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = [col[0] for col in data.columns]
+            data.columns.name = None
+        if "Close" not in data.columns or data["Close"].isna().all():
+            return None
+        latest_close = data["Close"].dropna().iloc[-1]
+        if latest_close < 5:
+            return None
+        if len(data) < 30:
+            return None
+        macd_df = ta.macd(data["Close"], fast=12, slow=26, signal=9)
+        if macd_df is not None and not macd_df.dropna().empty:
+            data = pd.concat([data, macd_df], axis=1)
+            for i in range(-5, -1):
+                if data["MACD_12_26_9"].iloc[i - 1] < data["MACDs_12_26_9"].iloc[i - 1] and data["MACD_12_26_9"].iloc[i] > data["MACDs_12_26_9"].iloc[i]:
+                    return symbol
+    except:
+        return None
+    return None
 
-        # Skip this ticker if no data was returned
-        if data.empty:
-            continue
+# === Volume Spike ===
+def check_volume_spike(symbol):
+    try:
+        data = yf.download(symbol, period="365d", interval="1d", progress=False, auto_adjust=True)
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = [col[0] for col in data.columns]
+            data.columns.name = None
+        if "Close" not in data.columns or data["Close"].isna().all():
+            return None
+        latest_close = data["Close"].dropna().iloc[-1]
+        if latest_close < 5:
+            return None
+        if "Volume" not in data.columns or len(data) < 21:
+            return None
+        avg_volume = data["Volume"].iloc[-20:-1].mean()
+        if data["Volume"].iloc[-1] > avg_volume * 1.5:
+            return symbol
+    except:
+        return None
+    return None
 
-        # Calculate RSI (Relative Strength Index) with a 14-day window
-        rsi = ta.rsi(data['Close'], length=14)
+# === Multithreaded Screening Phases ===
+print("\n🔄 Running RSI filter...")
+rsi_passed = []
+with ThreadPoolExecutor(max_workers=20) as executor:
+    futures = {executor.submit(check_rsi, ticker): ticker for ticker in all_tickers}
+    for future in tqdm(as_completed(futures), total=len(futures)):
+        result = future.result()
+        if result:
+            rsi_passed.append(result)
+print(f"✅ RSI filter passed: {len(rsi_passed)} tickers")
 
-        # Only proceed if RSI was successfully calculated and not all NaN
-        if rsi is not None and not rsi.isna().all():
-            data['RSI'] = rsi  # Add RSI column to the DataFrame
+print("\n🔄 Running EMA crossover filter...")
+ema_passed = []
+with ThreadPoolExecutor(max_workers=20) as executor:
+    futures = {executor.submit(check_ema_crossover, ticker): ticker for ticker in rsi_passed}
+    for future in tqdm(as_completed(futures), total=len(futures)):
+        result = future.result()
+        if result:
+            ema_passed.append(result)
+print(f"✅ EMA crossover passed: {len(ema_passed)} tickers")
 
-            # Drop rows where RSI is still NaN
-            data = data.dropna(subset=['RSI'])
+print("\n🔄 Running MACD crossover filter...")
+macd_passed = []
+with ThreadPoolExecutor(max_workers=20) as executor:
+    futures = {executor.submit(check_macd_crossover, ticker): ticker for ticker in ema_passed}
+    for future in tqdm(as_completed(futures), total=len(futures)):
+        result = future.result()
+        if result:
+            macd_passed.append(result)
+print(f"✅ MACD crossover passed: {len(macd_passed)} tickers")
 
-            # If data is still valid, check if latest RSI < 30
-            if not data.empty and data['RSI'].iloc[-1] < 30:
-                results.append(symbol)  # Add ticker to result list
+print("\n🔄 Running Volume Spike filter...")
+volume_spike_passed = []
+with ThreadPoolExecutor(max_workers=20) as executor:
+    futures = {executor.submit(check_volume_spike, ticker): ticker for ticker in macd_passed}
+    for future in tqdm(as_completed(futures), total=len(futures)):
+        result = future.result()
+        if result:
+            volume_spike_passed.append(result)
+print(f"✅ Volume Spike filter passed: {len(volume_spike_passed)} tickers")
 
-    return results  # Return tickers with RSI < 30
-
-
-# === STEP 2: Function to filter for EMA 9 > EMA 21 crossover ===
-def screen_bullish_crossover(tickers):
-    final = []  # List to store tickers that meet the crossover condition
-
-    for symbol in tickers:
-        # Download 365 days of daily price data
-        data = yf.download(symbol, period="365d", interval="1d", progress=False)
-
-        # Skip ticker if no data
-        if data.empty:
-            continue
-
-        # Calculate 9-day and 21-day EMAs
-        data['EMA_short'] = ta.ema(data['Close'], length=9)
-        data['EMA_long'] = ta.ema(data['Close'], length=21)
-
-        # Drop any rows with missing EMA values
-        data = data.dropna(subset=['EMA_short', 'EMA_long'])
-
-        # Proceed only if data is valid and crossover condition is met:
-        # - Yesterday, short EMA was below long EMA
-        # - Today, short EMA is above long EMA
-        if not data.empty and \
-           data['EMA_short'].iloc[-2] < data['EMA_long'].iloc[-2] and \
-           data['EMA_short'].iloc[-1] > data['EMA_long'].iloc[-1]:
-            final.append(symbol)  # Add ticker to the final results
-
-    return final  # Return list of crossover-confirmed tickers
-
-
-# === STEP 3: Load tickers from a CSV file ===
-# Make sure you have 'nasdaq_nyse_tickers.csv' in the same folder with a column named 'symbol'
-df = pd.read_csv("all_us_tickers.csv")
-all_tickers = df['symbol'].tolist()
-#all_tickers = all_tickers[:50]  # ✅ Limit to first 50 tickers for testing
-
-
-
-# === STEP 4: Run the RSI and EMA screener ===
-rsi_qualified = screen_rsi_oversold(all_tickers)        # Stage 1: RSI filter
-bullish_crosses = screen_bullish_crossover(rsi_qualified)  # Stage 2: EMA crossover filter
-
-
-# === STEP 5: Save results into a JSON file ===
+# === Save results ===
 with open("screened_results.json", "w") as f:
-    json.dump(bullish_crosses, f)   # Write the final result list to a JSON file
+    json.dump(volume_spike_passed, f, indent=2)
 
-# === STEP 6: Print success message ===
-print("✅ Done! Screened results saved to screened_results.json")
+pd.DataFrame(volume_spike_passed, columns=["symbol"]).to_csv("screened_results.csv", index=False)
 
-import upload_via_ftp  # This will auto-run the FTP upload after screening
+print("\n🗖 Screener complete.")
+print("📁 Results saved to 'screened_results.json' and 'screened_results.csv'")
