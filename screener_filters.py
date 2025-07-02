@@ -34,7 +34,7 @@ def check_ema_crossover(symbol):
     return None
 
 def check_macd_crossover(symbol):
-    data = download_data(symbol)
+    data = download_data(symbol) 
     if data is None or data["Close"].dropna().iloc[-1] < 5 or len(data) < 30:
         return None
     macd = ta.macd(data["Close"], fast=12, slow=26, signal=9)

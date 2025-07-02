@@ -1,4 +1,5 @@
-streamlit
-pandas
+numpy==1.24.4
+pandas==1.5.3
 yfinance
-pandas_ta
+pandas_ta==0.3.14b0
+streamlit
