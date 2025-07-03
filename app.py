@@ -35,7 +35,7 @@ if st.button("🔍 Run Screener"):  # Run the screener when the button is clicke
 
     def threaded_run(filter_fn, **kwargs):  # Function to apply a filter function using threading
         results = []  # List to store passing tickers
-        with ThreadPoolExecutor(max_workers=20) as executor:  # Create a thread pool with 20 workers
+        with ThreadPoolExecutor(max_workers=50) as executor:  # Create a thread pool with 20 workers
             futures = {executor.submit(filter_fn, symbol, **kwargs): symbol for symbol in current}  # Submit each ticker to the filter
             for i, future in enumerate(as_completed(futures)):  # As futures complete...
                 result = future.result()  # Get the result from the future
