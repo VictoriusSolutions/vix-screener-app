@@ -9,22 +9,30 @@ from tqdm import tqdm  # For showing progress bar in loops
 # === Step 1: Load all tickers from CSV ===
 df = pd.read_csv("all_us_tickers.csv")  # Load tickers from a CSV file
 all_tickers = df["symbol"].dropna().unique().tolist()  # Load all tickers without filtering
-print(f"✅ Loaded {len(all_tickers)} tickers for screening")
+echo_count = len(all_tickers)
+print(f"✅ Loaded {echo_count} tickers for screening")
 
 # === RSI Filter ===
 def check_rsi(symbol):
     try:
+        # Download 1 year of daily stock price data
         data = yf.download(symbol, period="365d", interval="1d", progress=False, auto_adjust=True)
+
+        # Handle multi-level column names if present
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = [col[0] for col in data.columns]
             data.columns.name = None
+
+        # Skip if no usable data
         if "Close" not in data.columns or data["Close"].isna().all():
             return None
+
+        # Skip if latest price is below $5 or not enough data
         latest_close = data["Close"].dropna().iloc[-1]
-        if latest_close < 5:
+        if latest_close < 5 or len(data) < 20:
             return None
-        if len(data) < 20:
-            return None
+
+        # Calculate RSI and check if it's below 50
         data.ta.rsi(length=14, append=True)
         if "RSI_14" in data.columns and not data["RSI_14"].dropna().empty:
             latest_rsi = data["RSI_14"].dropna().iloc[-1]
@@ -44,13 +52,15 @@ def check_ema_crossover(symbol):
         if "Close" not in data.columns or data["Close"].isna().all():
             return None
         latest_close = data["Close"].dropna().iloc[-1]
-        if latest_close < 5:
+        if latest_close < 5 or len(data) < 25:
             return None
-        if len(data) < 25:
-            return None
+
+        # Calculate EMA 20 and EMA 50
         data["EMA20"] = ta.ema(data["Close"], length=20)
         data["EMA50"] = ta.ema(data["Close"], length=50)
         data.dropna(subset=["EMA20", "EMA50"], inplace=True)
+
+        # Look for a crossover in the last 5 days
         for i in range(-5, -1):
             if data["EMA20"].iloc[i - 1] < data["EMA50"].iloc[i - 1] and data["EMA20"].iloc[i] > data["EMA50"].iloc[i]:
                 return symbol
@@ -68,10 +78,10 @@ def check_macd_crossover(symbol):
         if "Close" not in data.columns or data["Close"].isna().all():
             return None
         latest_close = data["Close"].dropna().iloc[-1]
-        if latest_close < 5:
+        if latest_close < 5 or len(data) < 30:
             return None
-        if len(data) < 30:
-            return None
+
+        # Calculate MACD and check crossover
         macd_df = ta.macd(data["Close"], fast=12, slow=26, signal=9)
         if macd_df is not None and not macd_df.dropna().empty:
             data = pd.concat([data, macd_df], axis=1)
@@ -92,10 +102,10 @@ def check_volume_spike(symbol):
         if "Close" not in data.columns or data["Close"].isna().all():
             return None
         latest_close = data["Close"].dropna().iloc[-1]
-        if latest_close < 5:
+        if latest_close < 5 or "Volume" not in data.columns or len(data) < 21:
             return None
-        if "Volume" not in data.columns or len(data) < 21:
-            return None
+
+        # Calculate average volume and compare
         avg_volume = data["Volume"].iloc[-20:-1].mean()
         if data["Volume"].iloc[-1] > avg_volume * 1.5:
             return symbol
@@ -146,9 +156,9 @@ print(f"✅ Volume Spike filter passed: {len(volume_spike_passed)} tickers")
 
 # === Save results ===
 with open("screened_results.json", "w") as f:
-    json.dump(volume_spike_passed, f, indent=2)
+    json.dump(volume_spike_passed, f, indent=2)  # Save final passed tickers to JSON file
 
-pd.DataFrame(volume_spike_passed, columns=["symbol"]).to_csv("screened_results.csv", index=False)
+pd.DataFrame(volume_spike_passed, columns=["symbol"]).to_csv("screened_results.csv", index=False)  # Save as CSV
 
-print("\n🗖 Screener complete.")
+print("\n🔖 Screener complete.")
 print("📁 Results saved to 'screened_results.json' and 'screened_results.csv'")
