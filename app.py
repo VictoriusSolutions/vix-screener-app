@@ -5,12 +5,12 @@ from screener_filters import check_rsi, check_ema_crossover, check_macd_crossove
 
 # === Set up Streamlit app layout ===
 st.set_page_config(page_title="VIXTradingHub Stock Screener", layout="wide")  # Set the page title and layout format
-st.title("📈 VIX Screener")  # Title displayed on the app
+st.title("📈 VIXTradingHub Screener")  # Title displayed on the app
 
 # === Screener Overview and Strategy Context ===
 st.markdown("""
 ### 🧠 Strategy Context
-This VIX Screener helps filter stocks for **In-the-Money (ITM) LEAPS Options** with expirations **6 to 18 months out**, with the goal of exiting for profit **within a few weeks**.
+This VIXTradingHub Screener helps filter stocks for **In-the-Money (ITM) LEAPS Options** with expirations **6 to 18 months out**, with the goal of exiting for profit **within a few weeks**.
 
 We use this as part of the **Daily Stock Picks** series on [VIXTradingHub.com](https://vixtradinghub.com), where we handpick potential LEAPS plays using a combination of technical indicators.
 """)  # Explanation and purpose of the screener
