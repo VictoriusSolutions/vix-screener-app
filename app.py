@@ -45,7 +45,17 @@ with col2:
 if st.button("🔍 Run Screener"):  # Run button initiates the screening process
     st.info("Running filters... This may take a few minutes.")  # Inform the user the screener is running
 
-    # Inject custom CSS for green progress bar
+    # Auto-scroll to bottom on mobile so progress bar is visible
+    st.markdown("""
+        <script>
+            const run = () => {
+                window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+            };
+            setTimeout(run, 100);
+        </script>
+    """, unsafe_allow_html=True)
+
+    # Inject custom CSS for green progress bar without extra margin
     st.markdown("""
         <style>
         .stProgress > div > div > div > div {
