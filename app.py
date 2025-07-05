@@ -42,14 +42,12 @@ with col2:
     st.caption("📣 Volume spikes indicate unusual trading activity, possibly signaling news or institutional interest.")
 
 # === Initialize placeholder for progress bar and results ===
+st.markdown("⚙️ Stock screening is in progress... this may take a few minutes. Please wait.")  # Message always visible
 progress_placeholder = st.empty()  # Placeholder to display progress bar
 results_placeholder = st.empty()  # Placeholder to display result table
 
 # === Screener Execution ===
 if st.button("🔍 Run Screener"):  # Run button initiates the screening process
-
-    # Display informational message to the user above the progress bar
-    progress_placeholder.info("⚙️ Stock screening is in progress... this may take a few minutes. Please wait.")
 
     # Inject custom CSS for green progress bar
     st.markdown("""
@@ -68,9 +66,12 @@ if st.button("🔍 Run Screener"):  # Run button initiates the screening process
         with ThreadPoolExecutor(max_workers=20) as executor:  # Use thread pool for concurrency
             futures = {executor.submit(filter_fn, symbol, **kwargs): symbol for symbol in current}  # Submit tasks
             for i, future in enumerate(as_completed(futures)):  # As tasks complete...
-                result = future.result()  # Get result
-                if result:
-                    results.append(result)  # Add if passed
+                try:
+                    result = future.result()  # Get result
+                    if result:
+                        results.append(result)  # Add if passed
+                except Exception as e:
+                    print(f"Error processing {futures[future]}: {e}")  # Log any errors encountered
                 progress.progress((i + 1) / len(current))  # Update progress bar
         return results  # Return tickers that passed
 
