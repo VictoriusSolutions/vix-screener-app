@@ -47,7 +47,9 @@ results_placeholder = st.empty()  # Placeholder to display result table
 
 # === Screener Execution ===
 if st.button("🔍 Run Screener"):  # Run button initiates the screening process
-    progress_placeholder.info("Running filters... This may take a few minutes.")  # Inform the user the screener is running
+
+    # Display informational message to the user above the progress bar
+    progress_placeholder.info("⚙️ Stock screening is in progress... this may take a few minutes. Please wait.")
 
     # Inject custom CSS for green progress bar
     st.markdown("""
