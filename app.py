@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed  # For running f
 from screener_filters import check_rsi, check_ema_crossover, check_macd_crossover, check_volume_spike  # Importing screening filter functions
 
 # === Set up Streamlit app layout ===
-st.set_page_config(page_title="VIX Screener", layout="wide")  # Set the page title and layout format
+st.set_page_config(page_title="VIXTradingHub Stock Screener", layout="wide")  # Set the page title and layout format
 st.title("📈 VIX Screener")  # Title displayed on the app
 
 # === Screener Overview and Strategy Context ===
@@ -21,7 +21,7 @@ tickers = df['symbol'].dropna().unique().tolist()  # Drop NaNs and extract uniqu
 st.success(f"✅ Loaded {len(tickers)} tickers from internal list")  # Show success message with ticker count
 
 # === Screener Controls ===
-st.subheader("🔧 Screener Filters")  # Subheader for filter section
+st.subheader("🔧 Technical Stock Screener")  # Subheader for filter section
 
 col1, col2 = st.columns(2)  # Split filter controls into two columns
 
