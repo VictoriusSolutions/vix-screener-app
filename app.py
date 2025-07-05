@@ -44,6 +44,16 @@ with col2:
 # === Screener Execution ===
 if st.button("🔍 Run Screener"):  # Run button initiates the screening process
     st.info("Running filters... This may take a few minutes.")  # Inform the user the screener is running
+
+    # Inject custom CSS for green progress bar
+    st.markdown("""
+        <style>
+        .stProgress > div > div > div > div {
+            background-color: #22c55e !important;  /* Tailwind green-500 */
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
     progress = st.progress(0)  # Display a progress bar
     current = tickers  # Start with full list of tickers
 
