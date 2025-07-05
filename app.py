@@ -41,21 +41,15 @@ with col2:
     vol_mult = st.slider("Volume Multiplier", 1.0, 5.0, 1.5)  # Slider to set multiplier threshold for volume spike
     st.caption("📣 Volume spikes indicate unusual trading activity, possibly signaling news or institutional interest.")
 
+# === Initialize placeholder for progress bar and results ===
+progress_placeholder = st.empty()  # Placeholder to display progress bar
+results_placeholder = st.empty()  # Placeholder to display result table
+
 # === Screener Execution ===
 if st.button("🔍 Run Screener"):  # Run button initiates the screening process
-    st.info("Running filters... This may take a few minutes.")  # Inform the user the screener is running
+    progress_placeholder.info("Running filters... This may take a few minutes.")  # Inform the user the screener is running
 
-    # Auto-scroll to bottom on mobile so progress bar is visible
-    st.markdown("""
-        <script>
-            const run = () => {
-                window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-            };
-            setTimeout(run, 100);
-        </script>
-    """, unsafe_allow_html=True)
-
-    # Inject custom CSS for green progress bar without extra margin
+    # Inject custom CSS for green progress bar
     st.markdown("""
         <style>
         .stProgress > div > div > div > div {
@@ -64,7 +58,7 @@ if st.button("🔍 Run Screener"):  # Run button initiates the screening process
         </style>
     """, unsafe_allow_html=True)
 
-    progress = st.progress(0)  # Display a progress bar
+    progress = progress_placeholder.progress(0)  # Display a progress bar above the button
     current = tickers  # Start with full list of tickers
 
     def threaded_run(filter_fn, **kwargs):  # Function to run filters using multithreading
@@ -89,7 +83,7 @@ if st.button("🔍 Run Screener"):  # Run button initiates the screening process
 
     st.success(f"✅ Screener complete. {len(current)} tickers passed all selected filters.")  # Display number of passing tickers
     result_df = pd.DataFrame(current, columns=["symbol"])  # Create DataFrame of results
-    st.dataframe(result_df)  # Show results table
+    results_placeholder.dataframe(result_df)  # Show results table above the button
 
     csv = result_df.to_csv(index=False).encode('utf-8')  # Convert results to CSV bytes
     st.download_button("📥 Download CSV", csv, "screened_results.csv", "text/csv")  # Download button for CSV
