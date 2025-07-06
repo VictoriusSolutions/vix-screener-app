@@ -1,29 +1,30 @@
-# === Import necessary libraries ===
-import yfinance as yf  # For downloading stock price data from Yahoo Finance
-import pandas_ta as ta  # For technical indicators like RSI, EMA, MACD
-import pandas as pd  # For working with tabular data using DataFrames
+import yfinance as yf
+import pandas_ta as ta
+import pandas as pd
 
 # === Function to download historical stock data ===
 def download_data(symbol):
     try:
-        # Download 1 year of daily price data for the given symbol with adjusted prices
-        data = yf.download(symbol, period="365d", interval="1d", progress=False, auto_adjust=True)
+        # Use unadjusted prices and apply Adjusted Close manually
+        data = yf.download(symbol, period="365d", interval="1d", progress=False, auto_adjust=False)
 
-        # If columns are in MultiIndex format, flatten them
+        # Flatten columns if multi-indexed
         if isinstance(data.columns, pd.MultiIndex):
-            data.columns = [col[0] for col in data.columns]  # Keep only the first level of column names
+            data.columns = [col[0] for col in data.columns]
 
-        return data  # Return the DataFrame of downloaded data
+        # Overwrite Close with Adjusted Close to calculate RSI consistently
+        if "Adj Close" in data.columns:
+            data["Close"] = data["Adj Close"]
+
+        return data
     except:
-        return None  # Return None if download fails
+        return None
 
-# === RSI filter function ===
-# === RSI filter function (Updated for transparency and debugging) ===
+# === RSI filter function (improved for debugging and accuracy) ===
 def check_rsi(symbol, rsi_thresh=50, min_price=5, rsi_buffer=0):
     try:
-        data = download_data(symbol)  # Get historical stock data for the symbol
+        data = download_data(symbol)
 
-        # Validate data structure and price availability
         if (
             data is None or
             not isinstance(data, pd.DataFrame) or
@@ -32,36 +33,28 @@ def check_rsi(symbol, rsi_thresh=50, min_price=5, rsi_buffer=0):
         ):
             return None
 
-        close = data["Close"].dropna()  # Use adjusted closing prices
+        close = data["Close"].dropna()
         if close.empty or close.iloc[-1] < min_price:
             return None
 
-        # Calculate RSI(14) using pandas_ta
         data.ta.rsi(length=14, append=True)
         rsi = data["RSI_14"].dropna()
 
         if not rsi.empty:
             latest_rsi = rsi.iloc[-1]
-
-            # DEBUG: Print the symbol and RSI used (for CLI or log visibility)
             print(f"{symbol}: RSI = {latest_rsi:.2f}, Threshold = {rsi_thresh}")
-
-            # Return both symbol and RSI if below threshold (plus optional buffer)
             if latest_rsi < rsi_thresh + rsi_buffer:
-                return {"symbol": symbol, "rsi": round(latest_rsi, 2)}  # Rounded for display/debugging
+                return {"symbol": symbol, "rsi": round(latest_rsi, 2)}
     except Exception as e:
         print(f"Error checking RSI for {symbol}: {e}")
         return None
 
-    return None  # Default if conditions not met
-
+    return None
 
 # === EMA crossover filter ===
 def check_ema_crossover(symbol):
     try:
-        data = download_data(symbol)  # Download data for the given stock symbol
-
-        # Check if data is valid, has 'Close', and is long enough
+        data = download_data(symbol)
         if (
             data is None or
             not isinstance(data, pd.DataFrame) or
@@ -70,32 +63,28 @@ def check_ema_crossover(symbol):
         ):
             return None
 
-        close = data["Close"].dropna()  # Clean up closing prices
-        if close.empty or close.iloc[-1] < 5:  # Skip if price is too low
+        close = data["Close"].dropna()
+        if close.empty or close.iloc[-1] < 5:
             return None
 
-        # Compute Exponential Moving Averages (EMAs)
         data["EMA20"] = ta.ema(close, length=20)
         data["EMA50"] = ta.ema(close, length=50)
-        data = data.dropna(subset=["EMA20", "EMA50"])  # Remove rows with missing EMAs
+        data = data.dropna(subset=["EMA20", "EMA50"])
 
-        if len(data) < 6:  # Need at least 6 rows for crossover comparison
+        if len(data) < 6:
             return None
 
-        # Check for EMA20 crossing above EMA50 within the last 5 days
         for i in range(-5, -1):
             if data["EMA20"].iloc[i - 1] < data["EMA50"].iloc[i - 1] and data["EMA20"].iloc[i] > data["EMA50"].iloc[i]:
-                return symbol  # Return symbol if crossover condition is met
+                return symbol
     except:
-        return None  # Handle error silently
-    return None  # Default return
+        return None
+    return None
 
 # === MACD crossover filter ===
 def check_macd_crossover(symbol):
     try:
-        data = download_data(symbol)  # Download stock data
-
-        # Validate structure and size
+        data = download_data(symbol)
         if (
             data is None or
             not isinstance(data, pd.DataFrame) or
@@ -104,27 +93,23 @@ def check_macd_crossover(symbol):
         ):
             return None
 
-        close = data["Close"].dropna()  # Get cleaned close prices
-        if close.empty or close.iloc[-1] < 5:  # Skip if price is too low
+        close = data["Close"].dropna()
+        if close.empty or close.iloc[-1] < 5:
             return None
 
-        # Calculate MACD indicators
         macd = ta.macd(close, fast=12, slow=26, signal=9)
         if macd is not None:
-            data = pd.concat([data, macd], axis=1)  # Combine with original data
-
-            # Ensure both MACD and Signal lines exist
+            data = pd.concat([data, macd], axis=1)
             if "MACD_12_26_9" not in data.columns or "MACDs_12_26_9" not in data.columns:
                 return None
 
-            data = data.dropna(subset=["MACD_12_26_9", "MACDs_12_26_9"])  # Clean NaNs
+            data = data.dropna(subset=["MACD_12_26_9", "MACDs_12_26_9"])
             if len(data) < 6:
                 return None
 
-            # Look for MACD crossover in recent 5 days
             for i in range(-5, -1):
                 if data["MACD_12_26_9"].iloc[i - 1] < data["MACDs_12_26_9"].iloc[i - 1] and data["MACD_12_26_9"].iloc[i] > data["MACDs_12_26_9"].iloc[i]:
-                    return symbol  # Return symbol if crossover happened
+                    return symbol
     except:
         return None
     return None
@@ -132,9 +117,7 @@ def check_macd_crossover(symbol):
 # === Volume spike filter ===
 def check_volume_spike(symbol, multiplier=1.5):
     try:
-        data = download_data(symbol)  # Download price and volume data
-
-        # Validate volume and close columns and size
+        data = download_data(symbol)
         if (
             data is None or
             not isinstance(data, pd.DataFrame) or
@@ -144,16 +127,13 @@ def check_volume_spike(symbol, multiplier=1.5):
         ):
             return None
 
-        close = data["Close"].dropna()  # Get cleaned close prices
+        close = data["Close"].dropna()
         if close.empty or close.iloc[-1] < 5:
-            return None  # Ignore penny stocks
+            return None
 
-        # Calculate average volume for the last 20 days (excluding today)
         avg_volume = data["Volume"].iloc[-20:-1].mean()
-
-        # Check if today's volume is at least 1.5x the recent average
         if pd.notna(avg_volume) and data["Volume"].iloc[-1] > avg_volume * multiplier:
-            return symbol  # Return symbol if spike detected
+            return symbol
     except:
         return None
     return None
