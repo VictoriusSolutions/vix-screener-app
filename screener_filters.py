@@ -22,8 +22,10 @@ def download_data(symbol):
 
 # === RSI filter function (improved for debugging and accuracy) ===
 def check_rsi(symbol, rsi_thresh=50, min_price=5, rsi_buffer=0):
+    import pandas as pd
+
     try:
-        data = download_data(symbol)
+        data = yf.download(symbol, period="365d", interval="1d", progress=False, auto_adjust=False)
 
         if (
             data is None or
@@ -37,19 +39,28 @@ def check_rsi(symbol, rsi_thresh=50, min_price=5, rsi_buffer=0):
         if close.empty or close.iloc[-1] < min_price:
             return None
 
+        # Calculate RSI(14) using raw Close (standard default)
         data.ta.rsi(length=14, append=True)
         rsi = data["RSI_14"].dropna()
 
         if not rsi.empty:
             latest_rsi = rsi.iloc[-1]
-            print(f"{symbol}: RSI = {latest_rsi:.2f}, Threshold = {rsi_thresh}")
+
+            # === Debug Print for CLI or Terminal Run ===
+            print(f"\n=== {symbol} ===")
+            print(data[['Close']].tail(15))        # Last 15 days of prices
+            print(data[['RSI_14']].tail(15))       # Last 15 RSI values
+            print(f"Latest RSI: {latest_rsi:.2f} vs Threshold: {rsi_thresh}")
+
             if latest_rsi < rsi_thresh + rsi_buffer:
                 return {"symbol": symbol, "rsi": round(latest_rsi, 2)}
+
     except Exception as e:
         print(f"Error checking RSI for {symbol}: {e}")
         return None
 
     return None
+
 
 # === EMA crossover filter ===
 def check_ema_crossover(symbol):
