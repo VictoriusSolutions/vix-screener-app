@@ -18,11 +18,12 @@ def download_data(symbol):
         return None  # Return None if download fails
 
 # === RSI filter function ===
-def check_rsi(symbol, rsi_thresh=50, min_price=5):
+# === RSI filter function (Updated for transparency and debugging) ===
+def check_rsi(symbol, rsi_thresh=50, min_price=5, rsi_buffer=0):
     try:
         data = download_data(symbol)  # Get historical stock data for the symbol
 
-        # Check if data is valid and has enough rows and contains 'Close' column
+        # Validate data structure and price availability
         if (
             data is None or
             not isinstance(data, pd.DataFrame) or
@@ -31,19 +32,29 @@ def check_rsi(symbol, rsi_thresh=50, min_price=5):
         ):
             return None
 
-        close = data["Close"].dropna()  # Get cleaned 'Close' price series
-        if close.empty or close.iloc[-1] < min_price:  # Skip if last price is too low
+        close = data["Close"].dropna()  # Use adjusted closing prices
+        if close.empty or close.iloc[-1] < min_price:
             return None
 
-        data.ta.rsi(length=14, append=True)  # Compute RSI(14) and append to data
-        rsi = data["RSI_14"].dropna() if "RSI_14" in data.columns else pd.Series()  # Extract RSI column
+        # Calculate RSI(14) using pandas_ta
+        data.ta.rsi(length=14, append=True)
+        rsi = data["RSI_14"].dropna()
 
-        # Return symbol if the latest RSI is below the threshold
-        if not rsi.empty and rsi.iloc[-1] < rsi_thresh:
-            return symbol
-    except:
-        return None  # Return None if any error occurs
-    return None  # Default return if no conditions are met
+        if not rsi.empty:
+            latest_rsi = rsi.iloc[-1]
+
+            # DEBUG: Print the symbol and RSI used (for CLI or log visibility)
+            print(f"{symbol}: RSI = {latest_rsi:.2f}, Threshold = {rsi_thresh}")
+
+            # Return both symbol and RSI if below threshold (plus optional buffer)
+            if latest_rsi < rsi_thresh + rsi_buffer:
+                return {"symbol": symbol, "rsi": round(latest_rsi, 2)}  # Rounded for display/debugging
+    except Exception as e:
+        print(f"Error checking RSI for {symbol}: {e}")
+        return None
+
+    return None  # Default if conditions not met
+
 
 # === EMA crossover filter ===
 def check_ema_crossover(symbol):

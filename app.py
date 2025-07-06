@@ -1,92 +1,96 @@
-import streamlit as st  # Streamlit for building the web app UI
-import pandas as pd  # Pandas for handling dataframes
-from concurrent.futures import ThreadPoolExecutor, as_completed  # For running filter functions concurrently
-from screener_filters import check_rsi, check_ema_crossover, check_macd_crossover, check_volume_spike  # Importing screening filter functions
+import streamlit as st
+import pandas as pd
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from screener_filters import check_rsi, check_ema_crossover, check_macd_crossover, check_volume_spike
 
-# === Set up Streamlit app layout ===
-st.set_page_config(page_title="VIXTradingHub Stock Screener", layout="wide")  # Set the page title and layout format
-st.title("📈 VIXTradingHub Screener")  # Title displayed on the app
+st.set_page_config(page_title="VIXTradingHub Stock Screener", layout="wide")
+st.title("📈 VIXTradingHub Screener")
 
-# === Screener Overview and Strategy Context ===
 st.markdown("""
 ### 🧠 Strategy Context
 This VIXTradingHub Screener helps filter stocks for **In-the-Money (ITM) LEAPS Options** with expirations **6 to 18 months out**, with the goal of exiting for profit **within a few weeks**.
 
 We use this as part of the **Daily Stock Picks** series on [VIXTradingHub.com](https://vixtradinghub.com), where we handpick potential LEAPS plays using a combination of technical indicators.
-""")  # Explanation and purpose of the screener
+""")
 
-# === Load your internal ticker list ===
-df = pd.read_csv("all_us_tickers.csv")  # Read the list of tickers from CSV file
-tickers = df['symbol'].dropna().unique().tolist()  # Drop NaNs and extract unique ticker symbols
-st.success(f"✅ Loaded {len(tickers)} tickers from internal list")  # Show success message with ticker count
+df = pd.read_csv("all_us_tickers.csv")
+tickers = df['symbol'].dropna().unique().tolist()
+st.success(f"✅ Loaded {len(tickers)} tickers from internal list")
 
-# === Screener Controls ===
-st.subheader("🔧 Technical Stock Screener")  # Subheader for filter section
+st.subheader("🔧 Technical Stock Screener")
 
-col1, col2 = st.columns(2)  # Split filter controls into two columns
+col1, col2 = st.columns(2)
 
 with col1:
-    use_rsi = st.checkbox("RSI Filter", value=True)  # Toggle to enable RSI filter
-    rsi_thresh = st.slider("RSI Threshold", 10, 70, 50)  # Slider to set RSI threshold
+    use_rsi = st.checkbox("RSI Filter", value=True)
+    rsi_thresh = st.slider("RSI Threshold", 10, 70, 50)
     st.caption("📊 RSI (Relative Strength Index) detects overbought or oversold conditions. Values below the threshold suggest better entry opportunities.")
 
-    use_ema = st.checkbox("EMA 20/50 Crossover", value=True)  # Toggle to enable EMA crossover filter
+    use_ema = st.checkbox("EMA 20/50 Crossover", value=True)
     st.caption("📈 EMA crossover helps identify short-term momentum. A bullish crossover may indicate upward movement.")
 
 with col2:
-    use_macd = st.checkbox("MACD Crossover", value=True)  # Toggle to enable MACD crossover filter
+    use_macd = st.checkbox("MACD Crossover", value=True)
     st.caption("🔁 MACD (Moving Average Convergence Divergence) is used to spot trend reversals via signal line crossovers.")
 
-    use_volume = st.checkbox("Volume Spike", value=True)  # Toggle to enable volume spike filter
-    vol_mult = st.slider("Volume Multiplier", 1.0, 5.0, 1.5)  # Slider to set multiplier threshold for volume spike
+    use_volume = st.checkbox("Volume Spike", value=True)
+    vol_mult = st.slider("Volume Multiplier", 1.0, 5.0, 1.5)
     st.caption("📣 Volume spikes indicate unusual trading activity, possibly signaling news or institutional interest.")
 
-# === Initialize placeholder for progress bar and results ===
-progress_placeholder = st.empty()  # Placeholder to display progress bar
-results_placeholder = st.empty()  # Placeholder to display result table
+progress_placeholder = st.empty()
+results_placeholder = st.empty()
 
-# === Screener Execution ===
-if st.button("🔍 Run Screener"):  # Run button initiates the screening process
+if st.button("🔍 Run Screener"):
 
-    # Inject custom CSS for green progress bar
     st.markdown("""
         <style>
         .stProgress > div > div > div > div {
-            background-color: #22c55e !important;  /* Tailwind green-500 */
+            background-color: #22c55e !important;
         }
         </style>
     """, unsafe_allow_html=True)
 
     st.markdown("⚙️ Stock screening is in progress... this may take a few minutes. Please wait.")
-    progress = progress_placeholder.progress(0)  # Display a progress bar above the button
-    current = tickers  # Start with full list of tickers
+    progress = progress_placeholder.progress(0)
+    current = tickers
 
-    def threaded_run(filter_fn, **kwargs):  # Function to run filters using multithreading
-        results = []  # Initialize list to store results
-        with ThreadPoolExecutor(max_workers=20) as executor:  # Use thread pool for concurrency
-            futures = {executor.submit(filter_fn, symbol, **kwargs): symbol for symbol in current}  # Submit tasks
-            for i, future in enumerate(as_completed(futures)):  # As tasks complete...
+    def threaded_run(filter_fn, **kwargs):
+        results = []
+        with ThreadPoolExecutor(max_workers=20) as executor:
+            futures = {executor.submit(filter_fn, symbol, **kwargs): symbol for symbol in current}
+            for i, future in enumerate(as_completed(futures)):
                 try:
-                    result = future.result()  # Get result
+                    result = future.result()
                     if result:
-                        results.append(result)  # Add if passed
+                        # 👇 Modified: Handle both dict (e.g. RSI) and str (symbol only)
+                        if isinstance(result, dict):
+                            results.append(result)
+                        else:
+                            results.append({"symbol": result})
                 except Exception as e:
-                    print(f"Error processing {futures[future]}: {e}")  # Log any errors encountered
-                progress.progress((i + 1) / len(current))  # Update progress bar
-        return results  # Return tickers that passed
+                    print(f"Error processing {futures[future]}: {e}")
+                progress.progress((i + 1) / len(current))
+        return results
 
     if use_rsi:
-        current = threaded_run(check_rsi, rsi_thresh=rsi_thresh)  # Apply RSI filter if enabled
+        current = threaded_run(check_rsi, rsi_thresh=rsi_thresh)
     if use_ema:
-        current = threaded_run(check_ema_crossover)  # Apply EMA crossover filter if enabled
+        current = threaded_run(check_ema_crossover)
     if use_macd:
-        current = threaded_run(check_macd_crossover)  # Apply MACD crossover filter if enabled
+        current = threaded_run(check_macd_crossover)
     if use_volume:
-        current = threaded_run(check_volume_spike, multiplier=vol_mult)  # Apply Volume Spike filter if enabled
+        current = threaded_run(check_volume_spike, multiplier=vol_mult)
 
-    st.success(f"✅ Screener complete. {len(current)} tickers passed all selected filters.")  # Display number of passing tickers
-    result_df = pd.DataFrame(current, columns=["symbol"])  # Create DataFrame of results
-    results_placeholder.dataframe(result_df)  # Show results table above the button
+    st.success(f"✅ Screener complete. {len(current)} tickers passed all selected filters.")
 
-    csv = result_df.to_csv(index=False).encode('utf-8')  # Convert results to CSV bytes
-    st.download_button("📥 Download CSV", csv, "screened_results.csv", "text/csv")  # Download button for CSV
+    # 👇 Modified: No column assumption; handles symbol + optional RSI
+    result_df = pd.DataFrame(current)
+
+    # 👇 Optional: Sort by RSI if it exists
+    if "rsi" in result_df.columns:
+        result_df.sort_values(by="rsi", inplace=True)
+
+    results_placeholder.dataframe(result_df)
+
+    csv = result_df.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 Download CSV", csv, "screened_results.csv", "text/csv")
