@@ -4,10 +4,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from screener_filters import check_rsi, check_ema_crossover, check_macd_crossover, check_volume_spike
 
 st.set_page_config(page_title="VIXTradingHub Stock Screener", layout="wide")
-st.title("📈 VIXTradingHub Screener")
+st.title("\U0001F4C8 VIXTradingHub Screener")
 
 st.markdown("""
-### 🧠 Strategy Context
+### \U0001F9E0 Strategy Context
 This VIXTradingHub Screener helps filter stocks for **In-the-Money (ITM) LEAPS Options** with expirations **6 to 18 months out**, with the goal of exiting for profit **within a few weeks**.
 
 We use this as part of the **Daily Stock Picks** series on [VIXTradingHub.com](https://vixtradinghub.com), where we handpick potential LEAPS plays using a combination of technical indicators.
@@ -17,31 +17,30 @@ df = pd.read_csv("all_us_tickers.csv")
 tickers = df['symbol'].dropna().unique().tolist()
 st.success(f"✅ Loaded {len(tickers)} tickers from internal list")
 
-st.subheader("🔧 Technical Stock Screener")
+st.subheader("\U0001F527 Technical Stock Screener")
 
 col1, col2 = st.columns(2)
 
 with col1:
     use_rsi = st.checkbox("RSI Filter", value=True)
     rsi_thresh = st.slider("RSI Threshold", 10, 70, 50)
-    st.caption("📊 RSI (Relative Strength Index) detects overbought or oversold conditions. Values below the threshold suggest better entry opportunities.")
+    st.caption("\U0001F4CA RSI (Relative Strength Index) detects overbought or oversold conditions. Values below the threshold suggest better entry opportunities.")
 
     use_ema = st.checkbox("EMA 20/50 Crossover", value=True)
-    st.caption("📈 EMA crossover helps identify short-term momentum. A bullish crossover may indicate upward movement.")
+    st.caption("\U0001F4C8 EMA crossover helps identify short-term momentum. A bullish crossover may indicate upward movement.")
 
 with col2:
     use_macd = st.checkbox("MACD Crossover", value=True)
-    st.caption("🔁 MACD (Moving Average Convergence Divergence) is used to spot trend reversals via signal line crossovers.")
+    st.caption("\U0001F501 MACD (Moving Average Convergence Divergence) is used to spot trend reversals via signal line crossovers.")
 
     use_volume = st.checkbox("Volume Spike", value=True)
     vol_mult = st.slider("Volume Multiplier", 1.0, 5.0, 1.5)
-    st.caption("📣 Volume spikes indicate unusual trading activity, possibly signaling news or institutional interest.")
+    st.caption("\U0001F4E3 Volume spikes indicate unusual trading activity, possibly signaling news or institutional interest.")
 
 progress_placeholder = st.empty()
 results_placeholder = st.empty()
 
-if st.button("🔍 Run Screener"):
-
+if st.button("\U0001F50D Run Screener"):
     st.markdown("""
         <style>
         .stProgress > div > div > div > div {
@@ -62,7 +61,6 @@ if st.button("🔍 Run Screener"):
                 try:
                     result = future.result()
                     if result:
-                        # 👇 Modified: Handle both dict (e.g. RSI) and str (symbol only)
                         if isinstance(result, dict):
                             results.append(result)
                         else:
@@ -82,15 +80,12 @@ if st.button("🔍 Run Screener"):
         current = threaded_run(check_volume_spike, multiplier=vol_mult)
 
     st.success(f"✅ Screener complete. {len(current)} tickers passed all selected filters.")
-
-    # 👇 Modified: No column assumption; handles symbol + optional RSI
     result_df = pd.DataFrame(current)
 
-    # 👇 Optional: Sort by RSI if it exists
     if "rsi" in result_df.columns:
         result_df.sort_values(by="rsi", inplace=True)
 
     results_placeholder.dataframe(result_df)
 
     csv = result_df.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Download CSV", csv, "screened_results.csv", "text/csv")
+    st.download_button("\U0001F4E5 Download CSV", csv, "screened_results.csv", "text/csv")

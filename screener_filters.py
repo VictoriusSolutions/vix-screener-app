@@ -1,139 +1,120 @@
-import yfinance as yf
-import pandas_ta as ta
+import os
+import time
 import pandas as pd
+import pandas_ta as ta
+import finnhub
+from datetime import datetime, timedelta
 
-# === Function to download historical stock data ===
+# Setup: Finnhub client
+FINNHUB_API_KEY = "d1lg2s1r01qt4thfvtk0d1lg2s1r01qt4thfvtkg"  # Replace with your actual key
+client = finnhub.Client(api_key=FINNHUB_API_KEY)
+
+# Directory for caching
+CACHE_DIR = "data"
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+# === Helper: Convert date to UNIX timestamp
+def to_unix(dt):
+    return int(time.mktime(dt.timetuple()))
+
+# === Download and cache 1y daily OHLCV data ===
 def download_data(symbol):
     try:
-        # Use unadjusted prices and apply Adjusted Close manually
-        data = yf.download(symbol, period="365d", interval="1d", progress=False, auto_adjust=False)
+        cache_file = os.path.join(CACHE_DIR, f"{symbol}.csv")
+        today = datetime.utcnow().date()
 
-        # Flatten columns if multi-indexed
-        if isinstance(data.columns, pd.MultiIndex):
-            data.columns = [col[0] for col in data.columns]
+        # Check cache
+        if os.path.exists(cache_file):
+            df = pd.read_csv(cache_file, index_col=0, parse_dates=True)
+            if df.index[-1].date() >= today - timedelta(days=1):
+                return df  # Use cached version
 
-        # Overwrite Close with Adjusted Close to calculate RSI consistently
-        if "Adj Close" in data.columns:
-            data["Close"] = data["Adj Close"]
+        # Otherwise fetch from API
+        to_ts = int(time.time())
+        from_ts = to_unix(datetime.utcnow() - timedelta(days=365))
 
-        return data
-    except:
+        candles = client.stock_candles(symbol, "D", from_ts, to_ts)
+        if candles.get("s") != "ok":
+            return None
+
+        df = pd.DataFrame({
+            "close": candles["c"],
+            "open": candles["o"],
+            "high": candles["h"],
+            "low": candles["l"],
+            "volume": candles["v"],
+            "timestamp": pd.to_datetime(candles["t"], unit="s")
+        }).set_index("timestamp")
+
+        df.to_csv(cache_file)  # Save to cache
+        return df
+
+    except Exception as e:
+        print(f"Download error for {symbol}: {e}")
         return None
 
-# === RSI filter function (improved for debugging and accuracy) ===
+# === RSI filter ===
 def check_rsi(symbol, rsi_thresh=50, min_price=5, rsi_buffer=0):
     try:
-        data = download_data(symbol)
-
-        if (
-            data is None or
-            not isinstance(data, pd.DataFrame) or
-            "Close" not in data.columns or
-            len(data) < 20
-        ):
+        df = download_data(symbol)
+        if df is None or len(df) < 20 or df["close"].iloc[-1] < min_price:
             return None
 
-        close = data["Close"].dropna()
-        if close.empty or close.iloc[-1] < min_price:
-            return None
-
-        data.ta.rsi(length=14, append=True)
-        rsi = data["RSI_14"].dropna()
-
-        if not rsi.empty:
-            latest_rsi = rsi.iloc[-1]
-            print(f"{symbol}: RSI = {latest_rsi:.2f}, Threshold = {rsi_thresh}")
-            if latest_rsi < rsi_thresh + rsi_buffer:
-                return {"symbol": symbol, "rsi": round(latest_rsi, 2)}
+        df.ta.rsi(length=14, append=True)
+        rsi = df["RSI_14"].dropna()
+        if not rsi.empty and rsi.iloc[-1] < rsi_thresh + rsi_buffer:
+            return {"symbol": symbol, "rsi": round(rsi.iloc[-1], 2)}
     except Exception as e:
-        print(f"Error checking RSI for {symbol}: {e}")
-        return None
-
+        print(f"RSI error for {symbol}: {e}")
     return None
 
 # === EMA crossover filter ===
 def check_ema_crossover(symbol):
     try:
-        data = download_data(symbol)
-        if (
-            data is None or
-            not isinstance(data, pd.DataFrame) or
-            "Close" not in data.columns or
-            len(data) < 50
-        ):
+        df = download_data(symbol)
+        if df is None or len(df) < 60 or df["close"].iloc[-1] < 5:
             return None
 
-        close = data["Close"].dropna()
-        if close.empty or close.iloc[-1] < 5:
-            return None
-
-        data["EMA20"] = ta.ema(close, length=20)
-        data["EMA50"] = ta.ema(close, length=50)
-        data = data.dropna(subset=["EMA20", "EMA50"])
-
-        if len(data) < 6:
-            return None
+        df["EMA20"] = ta.ema(df["close"], length=20)
+        df["EMA50"] = ta.ema(df["close"], length=50)
+        df = df.dropna(subset=["EMA20", "EMA50"])
 
         for i in range(-5, -1):
-            if data["EMA20"].iloc[i - 1] < data["EMA50"].iloc[i - 1] and data["EMA20"].iloc[i] > data["EMA50"].iloc[i]:
+            if df["EMA20"].iloc[i - 1] < df["EMA50"].iloc[i - 1] and df["EMA20"].iloc[i] > df["EMA50"].iloc[i]:
                 return symbol
-    except:
-        return None
+    except Exception as e:
+        print(f"EMA error for {symbol}: {e}")
     return None
 
 # === MACD crossover filter ===
 def check_macd_crossover(symbol):
     try:
-        data = download_data(symbol)
-        if (
-            data is None or
-            not isinstance(data, pd.DataFrame) or
-            "Close" not in data.columns or
-            len(data) < 30
-        ):
+        df = download_data(symbol)
+        if df is None or len(df) < 35 or df["close"].iloc[-1] < 5:
             return None
 
-        close = data["Close"].dropna()
-        if close.empty or close.iloc[-1] < 5:
+        macd = ta.macd(df["close"])
+        df = pd.concat([df, macd], axis=1).dropna()
+        if "MACD_12_26_9" not in df.columns or "MACDs_12_26_9" not in df.columns:
             return None
 
-        macd = ta.macd(close, fast=12, slow=26, signal=9)
-        if macd is not None:
-            data = pd.concat([data, macd], axis=1)
-            if "MACD_12_26_9" not in data.columns or "MACDs_12_26_9" not in data.columns:
-                return None
-
-            data = data.dropna(subset=["MACD_12_26_9", "MACDs_12_26_9"])
-            if len(data) < 6:
-                return None
-
-            for i in range(-5, -1):
-                if data["MACD_12_26_9"].iloc[i - 1] < data["MACDs_12_26_9"].iloc[i - 1] and data["MACD_12_26_9"].iloc[i] > data["MACDs_12_26_9"].iloc[i]:
-                    return symbol
-    except:
-        return None
+        for i in range(-5, -1):
+            if df["MACD_12_26_9"].iloc[i - 1] < df["MACDs_12_26_9"].iloc[i - 1] and df["MACD_12_26_9"].iloc[i] > df["MACDs_12_26_9"].iloc[i]:
+                return symbol
+    except Exception as e:
+        print(f"MACD error for {symbol}: {e}")
     return None
 
 # === Volume spike filter ===
 def check_volume_spike(symbol, multiplier=1.5):
     try:
-        data = download_data(symbol)
-        if (
-            data is None or
-            not isinstance(data, pd.DataFrame) or
-            "Close" not in data.columns or
-            "Volume" not in data.columns or
-            len(data) < 21
-        ):
+        df = download_data(symbol)
+        if df is None or len(df) < 21 or df["close"].iloc[-1] < 5:
             return None
 
-        close = data["Close"].dropna()
-        if close.empty or close.iloc[-1] < 5:
-            return None
-
-        avg_volume = data["Volume"].iloc[-20:-1].mean()
-        if pd.notna(avg_volume) and data["Volume"].iloc[-1] > avg_volume * multiplier:
+        avg_volume = df["volume"].iloc[-20:-1].mean()
+        if df["volume"].iloc[-1] > avg_volume * multiplier:
             return symbol
-    except:
-        return None
+    except Exception as e:
+        print(f"Volume error for {symbol}: {e}")
     return None
