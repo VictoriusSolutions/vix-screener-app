@@ -5,18 +5,19 @@ import requests
 from datetime import datetime, timedelta
 from pandas_ta import rsi, ema, macd
 
-# === Twelve Data API Setup ===
-TWELVE_API_KEY = os.getenv("TWELVE_API_KEY", "f188f356e3484b21b8f5e77001e1343e")
-BASE_URL = "https://api.twelvedata.com/time_series"
+# === Polygon.io API Setup ===
+POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "LzVEztPbgAekcs6mC5CBQ2Joa0_KNYAs")
+BASE_URL = "https://api.polygon.io/v2/aggs/ticker"
 
 CACHE_DIR = "data"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
-# === Download and cache 1y daily OHLCV data (with backoff and rate limiting) ===
+# === Download and cache 1y daily OHLCV data from Polygon.io ===
 def download_data(symbol):
     try:
         cache_file = os.path.join(CACHE_DIR, f"{symbol}.csv")
         today = datetime.utcnow().date()
+        one_year_ago = today - timedelta(days=365)
 
         # Use cached file if it's up to date
         if os.path.exists(cache_file):
@@ -24,37 +25,31 @@ def download_data(symbol):
             if not df.empty and df.index[-1].date() >= today - timedelta(days=1):
                 return df
 
-        # Request from Twelve Data API with backoff
-        params = {
-            "symbol": symbol,
-            "interval": "1day",
-            "outputsize": 100,
-            "apikey": TWELVE_API_KEY,
-        }
-
-        url = f"{BASE_URL}?" + "&".join(f"{k}={v}" for k, v in params.items())
+        url = f"{BASE_URL}/{symbol}/range/1/day/{one_year_ago}/{today}?adjusted=true&sort=asc&limit=50000&apiKey={POLYGON_API_KEY}"
         print("Requesting:", url)
 
-        for attempt in range(3):
-            try:
-                resp = requests.get(url, timeout=10)
-                data = resp.json()
-                if "values" not in data:
-                    raise ValueError(data.get("message", "No data returned."))
-                break
-            except Exception as e:
-                print(f"Attempt {attempt + 1} failed for {symbol}: {e}")
-                time.sleep(1 + attempt * 2)
-        else:
-            raise RuntimeError(f"Failed to fetch data for {symbol} after 3 attempts.")
+        resp = requests.get(url, timeout=10)
+        data = resp.json()
 
-        df = pd.DataFrame(data["values"])
-        df = df.rename(columns={"datetime": "timestamp", "close": "close", "open": "open", "high": "high", "low": "low", "volume": "volume"})
-        df = df.set_index(pd.to_datetime(df["timestamp"])).sort_index()
-        df = df[["open", "high", "low", "close", "volume"]].astype(float)
+        if "results" not in data:
+            raise ValueError(data.get("message", "No data returned."))
 
+        records = []
+        for item in data["results"]:
+            ts = datetime.utcfromtimestamp(item["t"] / 1000)
+            records.append({
+                "timestamp": ts,
+                "open": item["o"],
+                "high": item["h"],
+                "low": item["l"],
+                "close": item["c"],
+                "volume": item["v"]
+            })
+
+        df = pd.DataFrame(records)
+        df = df.set_index("timestamp").sort_index()
         df.to_csv(cache_file)
-        time.sleep(0.4)  # Throttle to reduce rate limit impact
+        time.sleep(0.2)  # Throttle slightly
         return df
 
     except Exception as e:
