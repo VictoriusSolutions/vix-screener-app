@@ -1,7 +1,6 @@
 import os
 import time
 import pandas as pd
-import pandas_ta as ta
 import requests
 from datetime import datetime, timedelta
 
