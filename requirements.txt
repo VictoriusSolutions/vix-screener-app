@@ -1,6 +1,6 @@
-streamlit
-pandas
+streamlit==1.35.0
+pandas==2.2.2
 requests
-pandas_ta
+pandas_ta==0.3.14b0
 python-dotenv
-numpy
+numpy==1.24.4
