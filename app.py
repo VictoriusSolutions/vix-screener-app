@@ -13,6 +13,7 @@ This VIXTradingHub Screener helps filter stocks for **In-the-Money (ITM) LEAPS O
 We use this as part of the **Daily Stock Picks** series on [VIXTradingHub.com](https://vixtradinghub.com), where we handpick potential LEAPS plays using a combination of technical indicators.
 """)
 
+# Load ticker symbols
 df = pd.read_csv("all_us_tickers.csv")
 tickers = df['symbol'].dropna().unique().tolist()
 st.success(f"✅ Loaded {len(tickers)} tickers from internal list")
@@ -51,11 +52,11 @@ if st.button("\U0001F50D Run Screener"):
 
     st.markdown("⚙️ Stock screening is in progress... this may take a few minutes. Please wait.")
     progress = progress_placeholder.progress(0)
-    current = tickers
+    current = tickers[:]
 
     def threaded_run(filter_fn, **kwargs):
         results = []
-        with ThreadPoolExecutor(max_workers=20) as executor:
+        with ThreadPoolExecutor(max_workers=10) as executor:
             futures = {executor.submit(filter_fn, symbol, **kwargs): symbol for symbol in current}
             for i, future in enumerate(as_completed(futures)):
                 try:
@@ -71,16 +72,18 @@ if st.button("\U0001F50D Run Screener"):
         return results
 
     if use_rsi:
-        current = threaded_run(check_rsi, rsi_thresh=rsi_thresh)
+        filtered = threaded_run(check_rsi, rsi_thresh=rsi_thresh)
+        current = [item["symbol"] for item in filtered]
     if use_ema:
-        current = threaded_run(check_ema_crossover)
+        current = [r["symbol"] for r in threaded_run(check_ema_crossover) if r["symbol"] in current]
     if use_macd:
-        current = threaded_run(check_macd_crossover)
+        current = [r["symbol"] for r in threaded_run(check_macd_crossover) if r["symbol"] in current]
     if use_volume:
-        current = threaded_run(check_volume_spike, multiplier=vol_mult)
+        current = [r["symbol"] for r in threaded_run(check_volume_spike, multiplier=vol_mult) if r["symbol"] in current]
 
-    st.success(f"✅ Screener complete. {len(current)} tickers passed all selected filters.")
-    result_df = pd.DataFrame(current)
+    final_results = [{"symbol": sym} for sym in current]
+    st.success(f"✅ Screener complete. {len(final_results)} tickers passed all selected filters.")
+    result_df = pd.DataFrame(final_results)
 
     if "rsi" in result_df.columns:
         result_df.sort_values(by="rsi", inplace=True)
