@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from screener_filters import check_rsi, check_ema_crossover, check_macd_crossover, check_volume_spike
 
@@ -41,6 +42,19 @@ with col2:
 progress_placeholder = st.empty()
 results_placeholder = st.empty()
 
+# Caching Mechanism for OHLCV Data
+DATA_DIR = "ohlcv_cache"
+os.makedirs(DATA_DIR, exist_ok=True)
+
+def get_cached_data(symbol):
+    path = os.path.join(DATA_DIR, f"{symbol}.csv")
+    if os.path.exists(path):
+        return pd.read_csv(path)
+    return None
+
+def save_to_cache(symbol, df):
+    df.to_csv(os.path.join(DATA_DIR, f"{symbol}.csv"), index=False)
+
 if st.button("\U0001F50D Run Screener"):
     st.markdown("""
         <style>
@@ -57,7 +71,12 @@ if st.button("\U0001F50D Run Screener"):
     def threaded_run(filter_fn, **kwargs):
         results = []
         with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {executor.submit(filter_fn, symbol, **kwargs): symbol for symbol in current}
+            futures = {}
+            for symbol in current:
+                cached = get_cached_data(symbol)
+                if cached is not None:
+                    kwargs['cached_df'] = cached
+                futures[executor.submit(filter_fn, symbol, **kwargs)] = symbol
             for i, future in enumerate(as_completed(futures)):
                 try:
                     result = future.result()

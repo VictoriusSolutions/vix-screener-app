@@ -3,7 +3,6 @@ import time
 import pandas as pd
 import requests
 from datetime import datetime, timedelta
-from pandas_ta import rsi, ema, macd
 
 # === Polygon.io API Setup ===
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "LzVEztPbgAekcs6mC5CBQ2Joa0_KNYAs")
@@ -19,15 +18,12 @@ def download_data(symbol):
         today = datetime.utcnow().date()
         one_year_ago = today - timedelta(days=365)
 
-        # Use cached file if it's up to date
         if os.path.exists(cache_file):
             df = pd.read_csv(cache_file, index_col=0, parse_dates=True)
             if not df.empty and df.index[-1].date() >= today - timedelta(days=1):
                 return df
 
         url = f"{BASE_URL}/{symbol}/range/1/day/{one_year_ago}/{today}?adjusted=true&sort=asc&limit=50000&apiKey={POLYGON_API_KEY}"
-        print("Requesting:", url)
-
         resp = requests.get(url, timeout=10)
         data = resp.json()
 
@@ -49,37 +45,58 @@ def download_data(symbol):
         df = pd.DataFrame(records)
         df = df.set_index("timestamp").sort_index()
         df.to_csv(cache_file)
-        time.sleep(0.2)  # Throttle slightly
+        time.sleep(0.2)
         return df
 
     except Exception as e:
         print(f"Download error for {symbol}: {e}")
         return None
 
+# === Compute RSI ===
+def compute_rsi(series, period=14):
+    delta = series.diff()
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+    avg_gain = gain.rolling(window=period).mean()
+    avg_loss = loss.rolling(window=period).mean()
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+# === Compute EMA ===
+def compute_ema(series, span):
+    return series.ewm(span=span, adjust=False).mean()
+
+# === Compute MACD ===
+def compute_macd(series):
+    ema12 = compute_ema(series, 12)
+    ema26 = compute_ema(series, 26)
+    macd_line = ema12 - ema26
+    signal_line = macd_line.ewm(span=9, adjust=False).mean()
+    return macd_line, signal_line
+
 # === RSI filter ===
-def check_rsi(symbol, rsi_thresh=50, min_price=5, rsi_buffer=0):
+def check_rsi(symbol, rsi_thresh=50, min_price=5, rsi_buffer=0, cached_df=None):
     try:
-        df = download_data(symbol)
+        df = cached_df if cached_df is not None else download_data(symbol)
         if df is None or len(df) < 20 or df["close"].iloc[-1] < min_price:
             return None
 
-        df["RSI"] = rsi(df["close"], length=14)
+        df["RSI"] = compute_rsi(df["close"], period=14)
         if pd.notna(df["RSI"].iloc[-1]) and df["RSI"].iloc[-1] < rsi_thresh + rsi_buffer:
-            print(f"{symbol} RSI: {df['RSI'].iloc[-1]:.2f}")
             return {"symbol": symbol, "rsi": round(df["RSI"].iloc[-1], 2)}
     except Exception as e:
         print(f"RSI error for {symbol}: {e}")
     return None
 
 # === EMA crossover filter ===
-def check_ema_crossover(symbol):
+def check_ema_crossover(symbol, cached_df=None):
     try:
-        df = download_data(symbol)
+        df = cached_df if cached_df is not None else download_data(symbol)
         if df is None or len(df) < 60 or df["close"].iloc[-1] < 5:
             return None
 
-        df["EMA20"] = ema(df["close"], length=20)
-        df["EMA50"] = ema(df["close"], length=50)
+        df["EMA20"] = compute_ema(df["close"], 20)
+        df["EMA50"] = compute_ema(df["close"], 50)
         df = df.dropna(subset=["EMA20", "EMA50"])
 
         for i in range(-5, -1):
@@ -90,28 +107,28 @@ def check_ema_crossover(symbol):
     return None
 
 # === MACD crossover filter ===
-def check_macd_crossover(symbol):
+def check_macd_crossover(symbol, cached_df=None):
     try:
-        df = download_data(symbol)
+        df = cached_df if cached_df is not None else download_data(symbol)
         if df is None or len(df) < 35 or df["close"].iloc[-1] < 5:
             return None
 
-        macd_df = macd(df["close"])
-        df = pd.concat([df, macd_df], axis=1).dropna()
-        if "MACD_12_26_9" not in df.columns or "MACDs_12_26_9" not in df.columns:
-            return None
+        macd_line, signal_line = compute_macd(df["close"])
+        df["MACD"] = macd_line
+        df["Signal"] = signal_line
+        df = df.dropna(subset=["MACD", "Signal"])
 
         for i in range(-5, -1):
-            if df["MACD_12_26_9"].iloc[i - 1] < df["MACDs_12_26_9"].iloc[i - 1] and df["MACD_12_26_9"].iloc[i] > df["MACDs_12_26_9"].iloc[i]:
+            if df["MACD"].iloc[i - 1] < df["Signal"].iloc[i - 1] and df["MACD"].iloc[i] > df["Signal"].iloc[i]:
                 return {"symbol": symbol}
     except Exception as e:
         print(f"MACD error for {symbol}: {e}")
     return None
 
 # === Volume spike filter ===
-def check_volume_spike(symbol, multiplier=1.5):
+def check_volume_spike(symbol, multiplier=1.5, cached_df=None):
     try:
-        df = download_data(symbol)
+        df = cached_df if cached_df is not None else download_data(symbol)
         if df is None or len(df) < 21 or df["close"].iloc[-1] < 5:
             return None
 
