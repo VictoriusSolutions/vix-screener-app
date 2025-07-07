@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from pandas_ta import rsi, ema, macd  # Use pandas_ta explicitly
 
 # === Twelve Data API Setup ===
-TWELVE_API_KEY = os.getenv("TWELVE_API_KEY", "7251f7fecf024e339e69f9b3acd53253")
+TWELVE_API_KEY = os.getenv("TWELVE_API_KEY", "f188f356e3484b21b8f5e77001e1343e")
 BASE_URL = "https://api.twelvedata.com/indicator"
 
 CACHE_DIR = "data"
