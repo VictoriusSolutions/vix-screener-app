@@ -12,7 +12,7 @@ BASE_URL = "https://api.twelvedata.com/time_series"
 CACHE_DIR = "data"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
-# === Download and cache 1y daily OHLCV data ===
+# === Download and cache 1y daily OHLCV data (with backoff and rate limiting) ===
 def download_data(symbol):
     try:
         cache_file = os.path.join(CACHE_DIR, f"{symbol}.csv")
@@ -24,23 +24,29 @@ def download_data(symbol):
             if not df.empty and df.index[-1].date() >= today - timedelta(days=1):
                 return df
 
-        # Request from Twelve Data API
+        # Request from Twelve Data API with backoff
         params = {
             "symbol": symbol,
             "interval": "1day",
-            "outputsize": 500,
-            "start_date": (today - timedelta(days=365)).strftime("%Y-%m-%d"),
-            "end_date": today.strftime("%Y-%m-%d"),
+            "outputsize": 100,
             "apikey": TWELVE_API_KEY,
         }
 
         url = f"{BASE_URL}?" + "&".join(f"{k}={v}" for k, v in params.items())
         print("Requesting:", url)
-        resp = requests.get(url)
-        data = resp.json()
 
-        if "values" not in data:
-            raise ValueError(data.get("message", "No data returned."))
+        for attempt in range(3):
+            try:
+                resp = requests.get(url, timeout=10)
+                data = resp.json()
+                if "values" not in data:
+                    raise ValueError(data.get("message", "No data returned."))
+                break
+            except Exception as e:
+                print(f"Attempt {attempt + 1} failed for {symbol}: {e}")
+                time.sleep(1 + attempt * 2)
+        else:
+            raise RuntimeError(f"Failed to fetch data for {symbol} after 3 attempts.")
 
         df = pd.DataFrame(data["values"])
         df = df.rename(columns={"datetime": "timestamp", "close": "close", "open": "open", "high": "high", "low": "low", "volume": "volume"})
@@ -48,6 +54,7 @@ def download_data(symbol):
         df = df[["open", "high", "low", "close", "volume"]].astype(float)
 
         df.to_csv(cache_file)
+        time.sleep(0.4)  # Throttle to reduce rate limit impact
         return df
 
     except Exception as e:
