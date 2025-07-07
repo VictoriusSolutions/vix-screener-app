@@ -5,7 +5,7 @@ import requests
 from datetime import datetime, timedelta
 
 # === Polygon.io API Setup ===
-POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "LzVEztPbgAekcs6mC5CBQ2Joa0_KNYAs")
+POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "oJKYVH4FZFzK4U2zi6jNb9ZT0SZRK53P")
 BASE_URL = "https://api.polygon.io/v2/aggs/ticker"
 
 CACHE_DIR = "data"
