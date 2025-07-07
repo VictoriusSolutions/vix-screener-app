@@ -5,35 +5,33 @@ import requests
 from datetime import datetime, timedelta
 
 # === Polygon.io API Setup ===
-POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "oJKYVH4FZFzK4U2zi6jNb9ZT0SZRK53P")
-BASE_URL = "https://api.polygon.io/v2/aggs/ticker"
+POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "UEU7Nv69DiEpeGGeDrTLb575P4e7QTSe")
+GROUPED_CACHE_FILE = os.path.join("data", "grouped_ohlcv.csv")
+os.makedirs("data", exist_ok=True)
 
-CACHE_DIR = "data"
-os.makedirs(CACHE_DIR, exist_ok=True)
-
-# === Download and cache 1y daily OHLCV data from Polygon.io ===
-def download_data(symbol):
+# === Load grouped OHLCV data for all stocks (1 API call) ===
+def load_grouped_data(date=None):
     try:
-        cache_file = os.path.join(CACHE_DIR, f"{symbol}.csv")
-        today = datetime.utcnow().date()
-        one_year_ago = today - timedelta(days=365)
+        date = date or datetime.utcnow().date() - timedelta(days=1)
+        date_str = date.strftime("%Y-%m-%d")
 
-        if os.path.exists(cache_file):
-            df = pd.read_csv(cache_file, index_col=0, parse_dates=True)
-            if not df.empty and df.index[-1].date() >= today - timedelta(days=1):
-                return df
+        if os.path.exists(GROUPED_CACHE_FILE):
+            df = pd.read_csv(GROUPED_CACHE_FILE, parse_dates=["timestamp"])
+            if not df.empty and df["timestamp"].max().date() >= date:
+                return df.set_index("symbol")
 
-        url = f"{BASE_URL}/{symbol}/range/1/day/{one_year_ago}/{today}?adjusted=true&sort=asc&limit=50000&apiKey={POLYGON_API_KEY}"
+        url = f"https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/{date_str}?adjusted=true&apiKey={POLYGON_API_KEY}"
         resp = requests.get(url, timeout=10)
         data = resp.json()
 
         if "results" not in data:
-            raise ValueError(data.get("message", "No data returned."))
+            raise ValueError(data.get("message", "No grouped data returned."))
 
         records = []
         for item in data["results"]:
             ts = datetime.utcfromtimestamp(item["t"] / 1000)
             records.append({
+                "symbol": item["T"],
                 "timestamp": ts,
                 "open": item["o"],
                 "high": item["h"],
@@ -43,11 +41,23 @@ def download_data(symbol):
             })
 
         df = pd.DataFrame(records)
-        df = df.set_index("timestamp").sort_index()
-        df.to_csv(cache_file)
-        time.sleep(0.2)
-        return df
+        df.to_csv(GROUPED_CACHE_FILE, index=False)
+        return df.set_index("symbol")
 
+    except Exception as e:
+        print(f"Grouped data error: {e}")
+        return pd.DataFrame()
+
+# === Build mini dataframe for a single symbol from grouped cache ===
+def download_data(symbol):
+    try:
+        grouped_df = load_grouped_data()
+        if symbol not in grouped_df.index:
+            raise ValueError("Symbol not in grouped data.")
+        row = grouped_df.loc[symbol]
+        df = pd.DataFrame([row])
+        df.index = [row["timestamp"]]
+        return df
     except Exception as e:
         print(f"Download error for {symbol}: {e}")
         return None
@@ -78,7 +88,7 @@ def compute_macd(series):
 def check_rsi(symbol, rsi_thresh=50, min_price=5, rsi_buffer=0, cached_df=None):
     try:
         df = cached_df if cached_df is not None else download_data(symbol)
-        if df is None or len(df) < 20 or df["close"].iloc[-1] < min_price:
+        if df is None or df.empty or df["close"].iloc[-1] < min_price:
             return None
 
         df["RSI"] = compute_rsi(df["close"], period=14)
@@ -92,16 +102,15 @@ def check_rsi(symbol, rsi_thresh=50, min_price=5, rsi_buffer=0, cached_df=None):
 def check_ema_crossover(symbol, cached_df=None):
     try:
         df = cached_df if cached_df is not None else download_data(symbol)
-        if df is None or len(df) < 60 or df["close"].iloc[-1] < 5:
+        if df is None or df.empty or df["close"].iloc[-1] < 5:
             return None
 
         df["EMA20"] = compute_ema(df["close"], 20)
         df["EMA50"] = compute_ema(df["close"], 50)
         df = df.dropna(subset=["EMA20", "EMA50"])
 
-        for i in range(-5, -1):
-            if df["EMA20"].iloc[i - 1] < df["EMA50"].iloc[i - 1] and df["EMA20"].iloc[i] > df["EMA50"].iloc[i]:
-                return {"symbol": symbol}
+        if len(df) >= 2 and df["EMA20"].iloc[-2] < df["EMA50"].iloc[-2] and df["EMA20"].iloc[-1] > df["EMA50"].iloc[-1]:
+            return {"symbol": symbol}
     except Exception as e:
         print(f"EMA error for {symbol}: {e}")
     return None
@@ -110,7 +119,7 @@ def check_ema_crossover(symbol, cached_df=None):
 def check_macd_crossover(symbol, cached_df=None):
     try:
         df = cached_df if cached_df is not None else download_data(symbol)
-        if df is None or len(df) < 35 or df["close"].iloc[-1] < 5:
+        if df is None or df.empty or df["close"].iloc[-1] < 5:
             return None
 
         macd_line, signal_line = compute_macd(df["close"])
@@ -118,9 +127,8 @@ def check_macd_crossover(symbol, cached_df=None):
         df["Signal"] = signal_line
         df = df.dropna(subset=["MACD", "Signal"])
 
-        for i in range(-5, -1):
-            if df["MACD"].iloc[i - 1] < df["Signal"].iloc[i - 1] and df["MACD"].iloc[i] > df["Signal"].iloc[i]:
-                return {"symbol": symbol}
+        if len(df) >= 2 and df["MACD"].iloc[-2] < df["Signal"].iloc[-2] and df["MACD"].iloc[-1] > df["Signal"].iloc[-1]:
+            return {"symbol": symbol}
     except Exception as e:
         print(f"MACD error for {symbol}: {e}")
     return None
@@ -129,12 +137,10 @@ def check_macd_crossover(symbol, cached_df=None):
 def check_volume_spike(symbol, multiplier=1.5, cached_df=None):
     try:
         df = cached_df if cached_df is not None else download_data(symbol)
-        if df is None or len(df) < 21 or df["close"].iloc[-1] < 5:
+        if df is None or df.empty or df["close"].iloc[-1] < 5:
             return None
 
-        avg_volume = df["volume"].iloc[-20:-1].mean()
-        if df["volume"].iloc[-1] > avg_volume * multiplier:
-            return {"symbol": symbol}
+        return {"symbol": symbol} if df["volume"].iloc[-1] > multiplier * df["volume"].mean() else None
     except Exception as e:
         print(f"Volume error for {symbol}: {e}")
     return None

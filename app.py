@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from screener_filters import check_rsi, check_ema_crossover, check_macd_crossover, check_volume_spike
+from screener_filters import check_rsi, check_ema_crossover, check_macd_crossover, check_volume_spike, load_grouped_data
 
 st.set_page_config(page_title="VIXTradingHub Stock Screener", layout="wide")
 st.title("\U0001F4C8 VIXTradingHub Screener")
@@ -42,19 +42,6 @@ with col2:
 progress_placeholder = st.empty()
 results_placeholder = st.empty()
 
-# Caching Mechanism for OHLCV Data
-DATA_DIR = "ohlcv_cache"
-os.makedirs(DATA_DIR, exist_ok=True)
-
-def get_cached_data(symbol):
-    path = os.path.join(DATA_DIR, f"{symbol}.csv")
-    if os.path.exists(path):
-        return pd.read_csv(path)
-    return None
-
-def save_to_cache(symbol, df):
-    df.to_csv(os.path.join(DATA_DIR, f"{symbol}.csv"), index=False)
-
 if st.button("\U0001F50D Run Screener"):
     st.markdown("""
         <style>
@@ -66,46 +53,54 @@ if st.button("\U0001F50D Run Screener"):
 
     st.markdown("⚙️ Stock screening is in progress... this may take a few minutes. Please wait.")
     progress = progress_placeholder.progress(0)
-    current = tickers[:]
 
-    def threaded_run(filter_fn, **kwargs):
-        results = []
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {}
-            for symbol in current:
-                cached = get_cached_data(symbol)
-                if cached is not None:
-                    kwargs['cached_df'] = cached
-                futures[executor.submit(filter_fn, symbol, **kwargs)] = symbol
-            for i, future in enumerate(as_completed(futures)):
-                try:
-                    result = future.result()
-                    if result:
-                        if isinstance(result, dict):
-                            results.append(result)
-                        else:
-                            results.append({"symbol": result})
-                except Exception as e:
-                    print(f"Error processing {futures[future]}: {e}")
-                progress.progress((i + 1) / len(current))
-        return results
+    grouped_data = load_grouped_data()
+    total = len(tickers)
+    passed = set(tickers)
 
     if use_rsi:
-        filtered = threaded_run(check_rsi, rsi_thresh=rsi_thresh)
-        current = [item["symbol"] for item in filtered]
-    if use_ema:
-        current = [r["symbol"] for r in threaded_run(check_ema_crossover) if r["symbol"] in current]
-    if use_macd:
-        current = [r["symbol"] for r in threaded_run(check_macd_crossover) if r["symbol"] in current]
-    if use_volume:
-        current = [r["symbol"] for r in threaded_run(check_volume_spike, multiplier=vol_mult) if r["symbol"] in current]
+        results = []
+        for i, symbol in enumerate(tickers):
+            if symbol not in grouped_data:
+                continue
+            if check_rsi(symbol, rsi_thresh=rsi_thresh, grouped_data=grouped_data):
+                results.append(symbol)
+            progress.progress((i + 1) / total)
+        passed &= set(results)
 
-    final_results = [{"symbol": sym} for sym in current]
+    if use_ema:
+        results = []
+        for i, symbol in enumerate(tickers):
+            if symbol not in grouped_data or symbol not in passed:
+                continue
+            if check_ema_crossover(symbol, grouped_data=grouped_data):
+                results.append(symbol)
+            progress.progress((i + 1) / total)
+        passed &= set(results)
+
+    if use_macd:
+        results = []
+        for i, symbol in enumerate(tickers):
+            if symbol not in grouped_data or symbol not in passed:
+                continue
+            if check_macd_crossover(symbol, grouped_data=grouped_data):
+                results.append(symbol)
+            progress.progress((i + 1) / total)
+        passed &= set(results)
+
+    if use_volume:
+        results = []
+        for i, symbol in enumerate(tickers):
+            if symbol not in grouped_data or symbol not in passed:
+                continue
+            if check_volume_spike(symbol, multiplier=vol_mult, grouped_data=grouped_data):
+                results.append(symbol)
+            progress.progress((i + 1) / total)
+        passed &= set(results)
+
+    final_results = [{"symbol": s} for s in sorted(passed)]
     st.success(f"✅ Screener complete. {len(final_results)} tickers passed all selected filters.")
     result_df = pd.DataFrame(final_results)
-
-    if "rsi" in result_df.columns:
-        result_df.sort_values(by="rsi", inplace=True)
 
     results_placeholder.dataframe(result_df, use_container_width=True)
 
