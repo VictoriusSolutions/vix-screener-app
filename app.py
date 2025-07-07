@@ -88,7 +88,7 @@ if st.button("\U0001F50D Run Screener"):
     if "rsi" in result_df.columns:
         result_df.sort_values(by="rsi", inplace=True)
 
-    results_placeholder.dataframe(result_df)
+    results_placeholder.dataframe(result_df, use_container_width=True)
 
     csv = result_df.to_csv(index=False).encode('utf-8')
     st.download_button("\U0001F4E5 Download CSV", csv, "screened_results.csv", "text/csv")
