@@ -2,20 +2,15 @@ import os
 import time
 import pandas as pd
 import pandas_ta as ta
-import finnhub
+import requests
 from datetime import datetime, timedelta
 
-# Setup: Finnhub client
-FINNHUB_API_KEY = "d1lg2s1r01qt4thfvtk0d1lg2s1r01qt4thfvtkg"  # Replace with your actual key
-client = finnhub.Client(api_key=FINNHUB_API_KEY)
+# === Twelve Data API Setup ===
+TWELVE_API_KEY = os.getenv("TWELVE_API_KEY", "7251f7fecf024e339e69f9b3acd53253")
+BASE_URL = "https://api.twelvedata.com/time_series"
 
-# Directory for caching
 CACHE_DIR = "data"
 os.makedirs(CACHE_DIR, exist_ok=True)
-
-# === Helper: Convert date to UNIX timestamp
-def to_unix(dt):
-    return int(time.mktime(dt.timetuple()))
 
 # === Download and cache 1y daily OHLCV data ===
 def download_data(symbol):
@@ -23,30 +18,36 @@ def download_data(symbol):
         cache_file = os.path.join(CACHE_DIR, f"{symbol}.csv")
         today = datetime.utcnow().date()
 
-        # Check cache
+        # Use cached file if it's up to date
         if os.path.exists(cache_file):
             df = pd.read_csv(cache_file, index_col=0, parse_dates=True)
-            if df.index[-1].date() >= today - timedelta(days=1):
-                return df  # Use cached version
+            if not df.empty and df.index[-1].date() >= today - timedelta(days=1):
+                return df
 
-        # Otherwise fetch from API
-        to_ts = int(time.time())
-        from_ts = to_unix(datetime.utcnow() - timedelta(days=365))
+        # Request from Twelve Data API
+        params = {
+            "symbol": symbol,
+            "interval": "1day",
+            "outputsize": 500,
+            "start_date": (today - timedelta(days=365)).strftime("%Y-%m-%d"),
+            "end_date": today.strftime("%Y-%m-%d"),
+            "apikey": TWELVE_API_KEY,
+        }
 
-        candles = client.stock_candles(symbol, "D", from_ts, to_ts)
-        if candles.get("s") != "ok":
-            return None
+        url = f"{BASE_URL}?" + "&".join(f"{k}={v}" for k, v in params.items())
+        print("Requesting:", url)
+        resp = requests.get(url)
+        data = resp.json()
 
-        df = pd.DataFrame({
-            "close": candles["c"],
-            "open": candles["o"],
-            "high": candles["h"],
-            "low": candles["l"],
-            "volume": candles["v"],
-            "timestamp": pd.to_datetime(candles["t"], unit="s")
-        }).set_index("timestamp")
+        if "values" not in data:
+            raise ValueError(data.get("message", "No data returned."))
 
-        df.to_csv(cache_file)  # Save to cache
+        df = pd.DataFrame(data["values"])
+        df = df.rename(columns={"datetime": "timestamp", "close": "close", "open": "open", "high": "high", "low": "low", "volume": "volume"})
+        df = df.set_index(pd.to_datetime(df["timestamp"])).sort_index()
+        df = df[["open", "high", "low", "close", "volume"]].astype(float)
+
+        df.to_csv(cache_file)
         return df
 
     except Exception as e:
@@ -63,6 +64,7 @@ def check_rsi(symbol, rsi_thresh=50, min_price=5, rsi_buffer=0):
         df.ta.rsi(length=14, append=True)
         rsi = df["RSI_14"].dropna()
         if not rsi.empty and rsi.iloc[-1] < rsi_thresh + rsi_buffer:
+            print(f"{symbol} RSI: {rsi.iloc[-1]:.2f}")
             return {"symbol": symbol, "rsi": round(rsi.iloc[-1], 2)}
     except Exception as e:
         print(f"RSI error for {symbol}: {e}")
